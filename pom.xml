@@ -6,7 +6,7 @@
 
   <groupId>io.github.guillex7</groupId>
   <artifactId>jlhttp-extras</artifactId>
-  <version>3.0.0</version>
+  <version>3.0.1</version>
 
   <name>jlhttp-extras</name>
   <description>Useful classes for applications using JLHTTP</description>
