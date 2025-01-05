@@ -91,11 +91,15 @@ public class JarResourceContextHandler implements ContextHandler {
     private String getSanitizedBasePath(String rawBasePath) {
         String sanitizedBasePath = rawBasePath;
 
+        // Paths in jar files never start with a slash
         if (sanitizedBasePath.startsWith("/")) {
             sanitizedBasePath = sanitizedBasePath.substring(1);
         }
 
-        if (!sanitizedBasePath.endsWith("/")) {
+        // If length is 0, the base path is the root directory, so no need to add a
+        // trailing slash
+        // Otherwise, add the trailing slash if it is not already there
+        if (sanitizedBasePath.length() > 0 && !sanitizedBasePath.endsWith("/")) {
             sanitizedBasePath += "/";
         }
 
