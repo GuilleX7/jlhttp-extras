@@ -31,13 +31,37 @@ public class JarResourceContextHandler implements ContextHandler {
      */
     private final Map<String, JarEntry> jarEntriesByName = new HashMap<>();
     /**
+     * The jar file that this context handler serves.
+     */
+    private JarFile jarFile;
+    /**
      * The base path in the jar file that this context handler serves.
      */
     private String basePath;
+
     /**
-     * The class that the jar file is loaded from.
+     * Returns the path to the jar file that the given class is running from.
+     * 
+     * @return the path to the jar file
      */
-    private Class<?> classInJar;
+    public static String getJarFilePathFromClass(Class<?> baseClass) {
+        final URL classResource = baseClass.getResource(baseClass.getSimpleName() + ".class");
+        if (classResource == null) {
+            throw new RuntimeException("Class resource is null");
+        }
+
+        final String url = classResource.toString();
+        if (url.startsWith("jar:file:")) {
+            final String path = url.replaceAll("^jar:(file:.*[.]jar)!/.*", "$1");
+            try {
+                return Paths.get(new URL(path).toURI()).toString();
+            } catch (Exception e) {
+                throw new RuntimeException("Invalid jar file URL");
+            }
+        }
+
+        throw new RuntimeException("Not running from a jar file");
+    }
 
     /**
      * Creates a new {@code JarResourceContextHandler} that serves the given base
@@ -45,7 +69,7 @@ public class JarResourceContextHandler implements ContextHandler {
      * Note that if {@code JarResourceContextHandler} is not running from a jar
      * file, an exception will be thrown.
      * 
-     * @param basePath the base path to serve
+     * @param basePath the base path to serve inside the jar file
      * @throws IOException
      */
     public JarResourceContextHandler(String basePath) throws IOException {
@@ -59,18 +83,29 @@ public class JarResourceContextHandler implements ContextHandler {
      * Note that if the class is not running from a jar file, an exception
      * will be thrown.
      * 
-     * @param basePath   the base path to serve
+     * @param basePath   the base path to serve inside the jar file
      * @param classInJar the class to get the jar file from
      * @throws IOException
      */
     public JarResourceContextHandler(String basePath, Class<?> classInJar) throws IOException {
-        this.basePath = getSanitizedBasePath(basePath);
-        this.classInJar = classInJar;
+        this(basePath, JarResourceContextHandler.getJarFilePathFromClass(classInJar));
+    }
 
-        final URL jarUrl = new URL("jar:file:" + this.getJarFilePath(this.classInJar) + "!/");
+    /**
+     * Creates a new {@code JarResourceContextHandler} that serves the given base
+     * path in the specified jar file.
+     * 
+     * @param basePath      the base path to serve inside the jar file
+     * @param pathToJarFile the path to the jar file
+     * @throws IOException
+     */
+    public JarResourceContextHandler(String basePath, String pathToJar) throws IOException {
+        this.basePath = getSanitizedBasePath(basePath);
+
+        final URL jarUrl = new URL("jar:file:" + pathToJar + "!/");
         final JarURLConnection jarFileConnection = (JarURLConnection) jarUrl.openConnection();
 
-        final JarFile jarFile = jarFileConnection.getJarFile();
+        this.jarFile = jarFileConnection.getJarFile();
         final Enumeration<JarEntry> entries = jarFile.entries();
         while (entries.hasMoreElements()) {
             final JarEntry entry = entries.nextElement();
@@ -106,30 +141,6 @@ public class JarResourceContextHandler implements ContextHandler {
         return sanitizedBasePath;
     }
 
-    /**
-     * Returns the path to the jar file that the given class is running from.
-     * 
-     * @return the path to the jar file
-     */
-    private String getJarFilePath(Class<?> baseClass) {
-        final URL classResource = baseClass.getResource(baseClass.getSimpleName() + ".class");
-        if (classResource == null) {
-            throw new RuntimeException("Class resource is null");
-        }
-
-        final String url = classResource.toString();
-        if (url.startsWith("jar:file:")) {
-            final String path = url.replaceAll("^jar:(file:.*[.]jar)!/.*", "$1");
-            try {
-                return Paths.get(new URL(path).toURI()).toString();
-            } catch (Exception e) {
-                throw new RuntimeException("Invalid jar file URL");
-            }
-        }
-
-        throw new RuntimeException("Not running from a jar file");
-    }
-
     @Override
     public int serve(Request request, Response response) throws IOException {
         final String requestPath = request.getPath();
@@ -156,12 +167,7 @@ public class JarResourceContextHandler implements ContextHandler {
             return 404;
         }
 
-        URL resourceUrl = this.classInJar.getResource("/" + jarEntry.getName());
-        if (resourceUrl == null) {
-            return 404;
-        }
-
-        this.serveResourceContent(jarEntry, resourceUrl, request, response);
+        this.serveResourceContent(jarEntry, request, response);
         return 0;
     }
 
@@ -176,7 +182,7 @@ public class JarResourceContextHandler implements ContextHandler {
      * @param response    the response into which the content is written
      * @throws IOException
      */
-    private void serveResourceContent(JarEntry jarEntry, URL resourceUrl, Request request, Response response)
+    private void serveResourceContent(JarEntry jarEntry, Request request, Response response)
             throws IOException {
         final String fileName = jarEntry.getName();
         final long fileLength = jarEntry.getSize();
@@ -211,7 +217,7 @@ public class JarResourceContextHandler implements ContextHandler {
                 response.sendHeaders(200, fileLength, fileLastModified, fileETag,
                         HTTPServer.getContentType(fileName, "application/octet-stream"), range);
 
-                try (InputStream in = resourceUrl.openStream()) {
+                try (InputStream in = this.jarFile.getInputStream(jarEntry)) {
                     response.sendBody(in, fileLength, range);
                 }
                 break;
